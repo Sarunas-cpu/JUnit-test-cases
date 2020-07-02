@@ -1,0 +1,736 @@
+import org.junit.Assert;
+import org.junit.Test;
+
+import javax.swing.*;
+import java.util.ArrayList;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.EnumSet;
+
+public class TestingTest {
+    Controller c = new Controller();
+    Repository r = new Repository();
+    Authorisation auth = new Authorisation();
+    Session ses = new Session();
+    // WindowMain win = new WindowMain(800, 600, "Application", c);
+    @Test
+    public void testSessionIsSet() {
+        c.authenticate("axd000", "password", r.getUser("axd000").getPermissionLevel());
+        Assert.assertTrue(c.isLogged());
+        c.logOut();
+    }
+    @Test
+    public void testLogOut() {
+        c.authenticate("axd000", "password", r.getUser("axd000").getPermissionLevel());
+        c.logOut();
+        Assert.assertEquals(c.getLoggedStaffID(), null);
+    }
+    @Test
+    public void testCorrectLogin() {
+        Assert.assertTrue(c.authenticate("axd000", "password", r.getUser("axd000").getPermissionLevel()));
+        c.logOut();
+    }
+    @Test
+    public void testIncorrectPassword() {
+        Assert.assertFalse(c.authenticate("axd000", "pasword", r.getUser("axd000").getPermissionLevel()));
+        c.logOut();
+    }
+    @Test
+    public void testIncorrectUsername() {
+        Assert.assertFalse(c.authenticate("axd0", "password", r.getUser("axd000").getPermissionLevel()));
+        c.logOut();
+    }
+    @Test
+    public void testRecordedLogin() {
+        String timeStamp = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(new Date());
+        c.writeLog("Authentication", "svd000", "SUCCESS"); // Login attempt to be checked.
+
+        String text = returnLastLine("log.txt"); // Actual text to be compared. Variable updated inside while{}
+        Assert.assertEquals("svd000 attempted login at: " + timeStamp + " SUCCESS", text);
+    }
+    @Test
+    public void testLoadData() {
+        User x = r.getUser("axd000");
+        Assert.assertEquals("Alex", x.getName());
+    }
+    /**
+     * Document permissions for personal details
+     */
+    private EnumSet<PermissionLevel> docPermissionsPD() {
+        EnumSet<PermissionLevel> permissionsDoc = EnumSet.noneOf(PermissionLevel.class);
+        permissionsDoc.add(PermissionLevel.DIRECTORREAD);
+        permissionsDoc.add(PermissionLevel.EMPLOYEEREAD);
+        permissionsDoc.add(PermissionLevel.EMPLOYEEMODIFY);
+        permissionsDoc.add(PermissionLevel.HRREAD);
+        permissionsDoc.add(PermissionLevel.HRMODIFY);
+        return permissionsDoc;
+    }
+
+    @Test
+    public void testAuthorisationManagerOwn() {
+        // Initialising users with respective permission level MANAGER
+        User manager = new User("Alex", "axd000", "password", "Quality Assurance", PermissionLevel.MANAGER);
+        // Initialise personal detail file
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), manager, manager.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(manager.getStaffID(), manager.getPermissionLevel());
+        Assert.assertFalse(auth.authorise(manager.getPermissionLevel(), pd, ses));
+    }
+
+    @Test
+    public void testAuthorisationDirectorOwn() {
+        // Initialising user with respective permission level DIRECTOR
+        User director = new User("Sarunas", "svd000", "password", "Development", PermissionLevel.DIRECTOR);
+        // Initialise personal detail file
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), director, director.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(director.getStaffID(), director.getPermissionLevel());
+        Assert.assertTrue(auth.authorise(director.getPermissionLevel(), pd, ses));
+    }
+
+    @Test
+    public void testAuthorisationDirectorElse() {
+        // Initialising user with respective permission level DIRECTOR
+        User director = new User("Sarunas", "svd000", "password", "Development", PermissionLevel.DIRECTOR);
+        // initialise 2nd employee to check if the person can get authorised for read access
+        User employee2 = new User("Wuff2", "axd00", "password", "Logistics", PermissionLevel.EMPLOYEE);
+        // Initialise personal detail file
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), employee2, employee2.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(director.getStaffID(), director.getPermissionLevel());
+        Assert.assertTrue(auth.authorise(director.getPermissionLevel(), pd, ses));
+    }
+
+    @Test
+    public void testAuthorisationHROwn() {
+        // Initialising user with permission level HR
+        User hr = new User("Adam", "awp000", "password", "Human Resources", PermissionLevel.HR);
+        // Initialise authorisation
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), hr, hr.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(hr.getStaffID(), hr.getPermissionLevel());
+        Assert.assertTrue(auth.authorise(hr.getPermissionLevel(), pd, ses));
+    }
+
+    @Test
+    public void testAuthorisationHRElse() {
+        // Initialising user with permission level HR
+        User hr = new User("Adam", "awp000", "password", "Human Resources", PermissionLevel.HR);
+        // initialise 2nd employee to check if the person can get authorised for read access
+        User employee2 = new User("Wuff2", "axd00", "password", "Logistics", PermissionLevel.EMPLOYEE);
+        // Initialise authorisation
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), employee2, employee2.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(hr.getStaffID(), hr.getPermissionLevel());
+        Assert.assertTrue(auth.authorise(hr.getPermissionLevel(), pd, ses));
+    }
+
+    @Test
+    public void testAuthorisationEmployeeElse() {
+        // Initialising user with permission level EMPLOYEE
+        User employee = new User("Wuff", "abc111", "password", "Logistics", PermissionLevel.EMPLOYEE);
+        // initialise 2nd employee to check if the person can get authorised for read access
+        User employee2 = new User("Wuff2", "axd00", "password", "Logistics", PermissionLevel.EMPLOYEE);
+        // Initialise authorisation
+        PersonalDetails pd = new PersonalDetails("Personal Details", docPermissionsPD(), employee2, employee2.getStaffID(), "Address1", "Mommy");
+        // set session permission
+        ses.setSession(employee.getStaffID(), employee.getPermissionLevel());
+        Assert.assertFalse(auth.authorise(employee.getPermissionLevel(), pd, ses));
+    }
+
+    /**
+     * If the test fails the wrong line is added to the 'data.txt' file end, left it for testing purposes
+     */
+    @Test
+    public void testReadDocument() {
+        // Document type to be created
+        String docType = "PersonalDetails";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("whatever");
+        JTextField userID = new JTextField("svd000");
+        JTextField userName = new JTextField("Alex D");
+        JTextField userAddress = new JTextField("hell");
+        JTextField userNextOfKin = new JTextField("demon knight");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(userName);
+        values.add(userAddress);
+        values.add(userNextOfKin);
+
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("svd000", "password", null);
+        // write to the 'data.txt'
+        // get that document
+        PersonalDetails pd = (PersonalDetails) c.readDocument(docType, fileName.getText());
+        String actualString = "";
+        try {
+            // Read through the document and find the line that stores that file.
+            BufferedReader br = new BufferedReader(new FileReader("data.txt"));
+            String currentLine;
+            boolean found = false;
+            while (!found && (currentLine = br.readLine()) != null) {
+                String[] temp = currentLine.split("\\\\");
+                // If line being read is not a user (so it's a file), and if temp[0] is equal to the class name of that file.
+                if (temp[0].equals(docType) && temp[1].equals(pd.getDocumentName()) && temp[3].equals(pd.getStaffID())) {
+                    found = true;
+                    actualString = currentLine;
+                    // Copy existing Class name, file name and file permissions
+                }
+            }
+        } catch (IOException e) {
+            System.out.print("Something wrong with a reader");
+        }
+        Assert.assertEquals(returnLastLine("data.txt"), actualString);
+        deleteLine(actualString);
+    }
+
+    /**
+     * If the test fails the wrong line is added to the 'data.txt' file end, left it for testing purposes
+     */
+    @Test
+    public void testCreateDocumentPD() {
+        // Document type to be created
+        String docType = "PersonalDetails";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField userName = new JTextField("Alex D");
+        JTextField userAddress = new JTextField("hell");
+        JTextField userNextOfKin = new JTextField("demon knight");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(userName);
+        values.add(userAddress);
+        values.add(userNextOfKin);
+
+        String expectedString = "PersonalDetails\\dvd520\\DIRECTORREAD,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,HRMODIFY\\awp000\\Alex D\\hell\\demon knight";
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        //  Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentEmpD() {
+        // Document type to be created
+        String docType = "EmploymentDetails";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField cvField = new JTextField("yes");
+        JTextField interviewField = new JTextField("none");
+        JTextField departmentField = new JTextField("Logistics");
+        JTextField role = new JTextField("Slackie");
+        JTextField salary = new JTextField("52000");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(cvField);
+        values.add(interviewField);
+        values.add(departmentField);
+        values.add(role);
+        values.add(salary);
+
+        String expectedString = "EmploymentDetails\\dvd520\\DIRECTORREAD,EMPLOYEEREAD,HRREAD,HRMODIFY,MANAGERREAD\\awp000\\yes\\none\\Logistics\\Slackie\\52000";
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        // Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentSalInc() {
+        // Document type to be created
+        String docType = "SalaryIncrease";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField newSalary = new JTextField("60000");
+        JTextField startDate = new JTextField("18-03-2016");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(newSalary);
+        values.add(startDate);
+
+        String expectedString = "SalaryIncrease\\dvd520\\DIRECTORREAD,HRCREATE,HRREAD,HRMODIFY,MANAGERREAD\\awp000\\60000\\18-03-2016";
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        //  Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentProm() {
+        // Document type to be created
+        String docType = "Promotion";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField newRole = new JTextField("QA");
+        JTextField nSalary = new JTextField("72000");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(newRole);
+        values.add(nSalary);
+
+        String expectedString = "Promotion\\dvd520\\DIRECTORREAD,HRCREATE,HRREAD,HRMODIFY,MANAGERREAD\\awp000\\QA\\72000";
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentProbation() {
+        // Document type to be created
+        String docType = "Probation";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField reason = new JTextField("got bored");
+        JTextField sDate = new JTextField("02-12-2016");
+        JTextField reviewDate = new JTextField("02-12-2016");
+        JTextField endDate = new JTextField("02-12-2016");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(reason);
+        values.add(sDate);
+        values.add(reviewDate);
+        values.add(endDate);
+
+        String expectedString = "Probation\\dvd520\\DIRECTORREAD,HRCREATE,HRREAD,HRMODIFY,MANAGERREAD\\awp000\\got bored\\02-12-2016\\02-12-2016\\02-12-2016";
+
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(returnLastLine("data.txt"), expectedString);
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentTerm() {
+        // Document type to be created
+        String docType = "Termination";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("awp000");
+        JTextField reason = new JTextField("not good");
+        JTextField endDate = new JTextField("01-01-2016");
+        System.out.println(endDate.getText());
+        values.add(fileName);
+        values.add(userID);
+        values.add(reason);
+        values.add(endDate);
+
+        String expectedString = "Termination\\dvd520\\DIRECTORREAD,HRCREATE,HRREAD,HRMODIFY,MANAGERREAD\\awp000\\not good\\01-01-2016";
+        //write to the 'data.txt'
+        c.createDocument(docType, values);
+
+        c.authenticate("awp000", "password", PermissionLevel.HRMANAGER);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentAnRev() {
+        // Document type to be created
+        String docType = "AnnualReview";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("dvd520");
+        JTextField userID = new JTextField("abc111");
+        JTextField achievements = new JTextField("NA");
+        JTextField outcomes = new JTextField("NA");
+        JTextField futurePlans = new JTextField("Manager");
+        JTextField training = new JTextField("Developer");
+        JTextField mentoring = new JTextField("none");
+        JTextField reviewSummary = new JTextField("worth keeping");
+        JTextField employeeComments = new JTextField("NA");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(achievements);
+        values.add(outcomes);
+        values.add(futurePlans);
+        values.add(training);
+        values.add(mentoring);
+        values.add(reviewSummary);
+        values.add(employeeComments);
+
+        //write to the 'data.txt'
+        c.authenticate("abc111", "password", PermissionLevel.EMPLOYEE);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+
+        c.createDocument(docType, values);
+        // Get list of the managers of the users and check if manager matches with manager in created file
+        List<String> managers = r.getManagers("abc111");
+        String lastLine = returnLastLine("data.txt");
+        String[] type = lastLine.split("\\\\");
+        boolean match = false;
+        String currentManager = "";
+        System.out.println(managers);
+        for(int i = 0; i < managers.size() && !match;i++) {
+            if(managers.get(i).equals(type[3])) {
+                currentManager = type[3];
+                match = true;
+            }
+        }
+
+        String expectedString = "AnnualReview\\dvd520\\DIRECTORREAD,EMPLOYEECREATE,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,MANAGERREAD\\"+currentManager+"\\false\\abc111\\NA\\NA\\Manager\\Developer\\none\\worth keeping\\NA";
+
+        Assert.assertTrue(win.validateFields(values,docType, "NEW"));
+        Assert.assertEquals(expectedString, lastLine);
+
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testCreateDocumentAnRevDirector() {
+        // Document type to be created
+        String docType = "AnnualReview";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("an1");
+        JTextField userID = new JTextField("svd000");
+        JTextField achievements = new JTextField("NA");
+        JTextField outcomes = new JTextField("NA");
+        JTextField futurePlans = new JTextField("Owner");
+        JTextField training = new JTextField("none");
+        JTextField mentoring = new JTextField("none");
+        JTextField reviewSummary = new JTextField("very good");
+        JTextField employeeComments = new JTextField("none");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(achievements);
+        values.add(outcomes);
+        values.add(futurePlans);
+        values.add(training);
+        values.add(mentoring);
+        values.add(reviewSummary);
+        values.add(employeeComments);
+
+        String expectedString = "AnnualReview\\an1\\DIRECTORREAD,EMPLOYEECREATE,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,MANAGERREAD,MANAGERMODIFY\\svd000\\NA\\NA\\Owner\\none\\none\\very good\\none";
+        // Director use authenticates as employee
+        c.authenticate("svd000", "password", PermissionLevel.EMPLOYEE);
+        // Window to validate fields
+        WindowMain win = new WindowMain(800, 600, "Application", c);
+        // Should not validate as if Director tries to create annual review
+        Assert.assertFalse(win.validateFields(values,docType, "NEW"));
+        Assert.assertNotEquals(expectedString, returnLastLine("data.txt"));
+    }
+    @Test
+    public void testModifyPD() {
+        // Document type to be created
+        String docType = "PersonalDetails";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("whatever");
+        JTextField userID = new JTextField("awp000");
+        JTextField userName = new JTextField("Alex D");
+        JTextField userAddress = new JTextField("hell");
+        JTextField userNextOfKin = new JTextField("demon knight");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(userName);
+        values.add(userAddress);
+        values.add(userNextOfKin);
+
+        c.authenticate("awp000", "password", null);
+        // write to the 'data.txt'
+        c.createDocument(docType, values);
+        // get that document
+        PersonalDetails d = (PersonalDetails) c.readDocument(docType, fileName.getText());
+        // Text fields to be modified
+        ArrayList<JComponent> valuesM = new ArrayList<>();
+
+        JLabel userIDM = new JLabel(d.getStaffID());
+        JTextField userNameM = new JTextField("Alex Dr");
+        JTextField userAddressM = new JTextField("heaven");
+        JTextField userNextOfKinM = new JTextField("angel knight");
+
+        valuesM.add(userIDM);
+        valuesM.add(userNameM);
+        valuesM.add(userAddressM);
+        valuesM.add(userNextOfKinM);
+
+        String expectedString = "PersonalDetails\\whatever\\DIRECTORREAD,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,HRMODIFY\\awp000\\Alex Dr\\heaven\\angel knight";
+        //modify document in 'data.txt'
+        c.modifyDocument(d, valuesM);
+        Assert.assertEquals(expectedString, returnLastLine("data.txt"));
+        deleteLine(expectedString);
+    }
+
+    @Test
+    public void testModifyAnRev() {
+        // Document type to be created
+        String docType = "AnnualReview";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("whatever");
+        JTextField userID = new JTextField("abc111");
+        JTextField achievements = new JTextField("NA");
+        JTextField outcomes = new JTextField("NA");
+        JTextField futurePlans = new JTextField("Manager");
+        JTextField training = new JTextField("Developer");
+        JTextField mentoring = new JTextField("none");
+        JTextField reviewSummary = new JTextField("worth keeping");
+        JTextField employeeComments = new JTextField("NA");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(achievements);
+        values.add(outcomes);
+        values.add(futurePlans);
+        values.add(training);
+        values.add(mentoring);
+        values.add(reviewSummary);
+        values.add(employeeComments);
+
+        c.authenticate("abc111", "password", null);
+        // write to the 'data.txt'
+        c.createDocument(docType, values);
+        // get that document
+        AnnualReview d = (AnnualReview) c.readDocument(docType, fileName.getText());
+        // Text fields to be modified
+        ArrayList<JComponent> valuesM = new ArrayList<>();
+
+        JLabel userIDM = new JLabel(d.getStaffID());
+        JTextField achievementsM = new JTextField("Getting old");
+        JTextField outcomesM = new JTextField("Being old");
+        JTextField futurePlansM = new JTextField("Finding cure for youth");
+        JTextField trainingM = new JTextField("Potion making");
+        JTextField mentoringM = new JTextField("Grandmaster");
+        JTextField reviewSummaryM = new JTextField("Promotion to god");
+        JTextField employeeCommentsM = new JTextField("Good");
+
+        valuesM.add(userIDM);
+        valuesM.add(achievementsM);
+        valuesM.add(outcomesM);
+        valuesM.add(futurePlansM);
+        valuesM.add(trainingM);
+        valuesM.add(mentoringM);
+        valuesM.add(reviewSummaryM);
+        valuesM.add(employeeCommentsM);
+
+        //modify document in 'data.txt'
+        c.modifyDocument(d, valuesM);
+
+        // Get list of the managers of the users and check if manager matches with manager in created file
+        List<String> managers = r.getManagers("abc111");
+        String lastLine = returnLastLine("data.txt");
+        String[] type = lastLine.split("\\\\");
+        boolean match = false;
+        String currentManager = "";
+        for(int i = 0; i < managers.size() && !match;i++) {
+            if(managers.get(i).equals(type[3])) {
+                currentManager = type[3];
+                match = true;
+            }
+        }
+
+        String expectedString = "AnnualReview\\whatever\\DIRECTORREAD,EMPLOYEECREATE,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,MANAGERREAD\\"+currentManager+"\\false\\abc111\\Getting old\\Being old\\Finding cure for youth\\Potion making\\Grandmaster\\Promotion to god\\Good";
+
+        Assert.assertEquals(expectedString, lastLine);
+        deleteLine(expectedString);
+
+    }
+    @Test
+    public void testAssignReviewer() {
+        // Document type to be created
+        String docType = "AnnualReview";
+        // Text fields to be stored
+        ArrayList<JComponent> values = new ArrayList<>();
+
+        JTextField fileName = new JTextField("whatever");
+        JTextField userID = new JTextField("abc111");
+        JTextField achievements = new JTextField("NA");
+        JTextField outcomes = new JTextField("NA");
+        JTextField futurePlans = new JTextField("Manager");
+        JTextField training = new JTextField("Developer");
+        JTextField mentoring = new JTextField("none");
+        JTextField reviewSummary = new JTextField("worth keeping");
+        JTextField employeeComments = new JTextField("NA");
+
+        values.add(fileName);
+        values.add(userID);
+        values.add(achievements);
+        values.add(outcomes);
+        values.add(futurePlans);
+        values.add(training);
+        values.add(mentoring);
+        values.add(reviewSummary);
+        values.add(employeeComments);
+
+        c.authenticate("abc111", "password", null);
+        // write to the 'data.txt'
+        c.createDocument(docType, values);
+        // get that document
+        AnnualReview d = (AnnualReview) c.readDocument(docType, fileName.getText());
+        // Get list of the managers of the users and check if managers matches with manager in created file
+        List<String> managers = r.getManagers("abc111");
+        c.assignReviewer(d, managers.get(0));
+
+        String lastLine = returnLastLine("data.txt");
+        String[] type = lastLine.split("\\\\");
+        String[] reviewers = type[3].split(",");
+        boolean firstMatch = false;
+        boolean secondMatch = false;
+        boolean foundBoth = false;
+        String firstReviewer = "";
+        String secondReviewer = "";
+        String expectedReviewers = "";
+        for(int i = 0; i < managers.size() && !foundBoth;i++) {
+            if (firstMatch && secondMatch) {
+                foundBoth = true;
+            } else {
+                if(managers.get(i).equals(reviewers[0])) {
+                    firstMatch = true;
+                    firstReviewer = managers.get(i);
+                }
+                if(managers.get(i).equals(reviewers[1])){
+                    secondMatch = true;
+                    secondReviewer = managers.get(i);
+                }
+            }
+        }
+        expectedReviewers = firstReviewer + "," + secondReviewer;
+
+        String expectedString = "AnnualReview\\whatever\\DIRECTORREAD,EMPLOYEECREATE,EMPLOYEEREAD,EMPLOYEEMODIFY,HRREAD,MANAGERREAD\\"+expectedReviewers+"\\false\\abc111\\NA\\NA\\Manager\\Developer\\none\\worth keeping\\NA";
+
+        Assert.assertEquals(expectedString, lastLine);
+        deleteLine(expectedString);
+    }
+    private void deleteLine(String lineToDelete) {
+        BufferedReader reader = null;
+        try {
+            // Read through the document and find the line that stores that file.
+            reader = new BufferedReader(new FileReader("data.txt"));
+            String currentLine;
+            boolean found = false;
+            Integer line = 0;
+            while (!found && (currentLine = reader.readLine()) != null) {
+                if (currentLine.equals(lineToDelete)) {
+                    found = true;
+                }
+                line++;
+            }
+            // Read the whole file. Store all lines in a List. Replace the specific line with new data. Rewrite all data
+            Path path = Paths.get("data.txt");
+            List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+            lines.remove(line - 1);
+
+            Files.write(path, lines, StandardCharsets.UTF_8);
+        } catch (FileNotFoundException ex) {
+            System.out.println("File not found" + ex);
+        } catch (IOException ex2) {
+            System.out.println("IOException" + ex2);
+        } finally { // Close reader.
+            try {
+                if (reader != null) reader.close();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+    }
+
+    private String returnLastLine(String fileName) {
+        String text = ""; // Actual text to be compared. Variable updated inside while{}
+        String lastLine = ""; // Last line that was read from file. Updated until null.
+        BufferedReader reader = null; // Reader.
+        try {
+            reader = new BufferedReader(new FileReader(fileName));
+            // We go through each line in the file, setting lastLine as the last line that was read by the reader.
+            // If lastLine is not null, we updated the 'text' variable with the last line that was read.
+            while ((lastLine = reader.readLine()) != null) {
+                text = lastLine;
+            }
+        } catch (FileNotFoundException ex) {
+            System.out.println("File not found" + ex);
+        } catch (IOException ex2) {
+            System.out.println("IOException" + ex2);
+        } finally { // Close reader.
+            try {
+                if (reader != null) reader.close();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+        return text;
+    }
+}
